@@ -360,8 +360,9 @@ Bits   Description
 			:compressed-size (cd/compressed-size header)
 			:comment comment
 			:method (compression-method-name (cd/method header))
-                        :date (dos-to-universal-time
-			       (cd/date header) (cd/time header))
+			:date (cd/date header)
+                        :universal-time (dos-to-universal-time
+					 (cd/date header) (cd/time header))
 			:crc (cd/crc header)
 			:made-by (logand (ash (cd/version-made-by header) -8)
 					 #xff)
