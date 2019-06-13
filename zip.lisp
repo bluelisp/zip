@@ -600,7 +600,12 @@ else might be the default, probably LATIN-1."
             (code-char cp437)))
 
 (defgeneric write-zipentry (zip-writer name data
-			    &key file-write-date deflate file-mode))
+			    &key file-write-date deflate file-mode)
+  (:documentation
+   "Append a new entry called name to zipwriter. Read data from
+(unsigned-byte 8) stream data until EOF and compress it into
+\deflate\"-format. Use file-write-date as the entry's date and time.
+Default to (file-write-date data), use 1980-01-01T00:00 if nil."))
 
 (defmethod write-zipentry
     (zip-writer name (data pathname)
@@ -649,7 +654,7 @@ else might be the default, probably LATIN-1."
 	  (setf (file/time header)
 		(logior (ash h 11) (ash min 5) (ash s -1)))
 	  (setf (file/date header)
-		(logior (ash (- y 1980) 9) (ash m 5) d)))
+		(logior (ash (- y +dos-year-pivot+) 9) (ash m 5) d)))
 	(setf (file/crc header) 0)
 	(setf (file/compressed-size header) 0)
 	(setf (file/size header) 0)
@@ -855,6 +860,9 @@ IF-EXISTS as for in CL:OPEN."
     #-sbcl x))
 
 (defun zip (pathname source-directory &key (if-exists :error) skip-directories-p)
+  "Compress all files in source-directory recursively into a new zip
+archive at pathname. Note that entry file names will not contain the name
+source-directory."
   (let ((base (%directory-namestring (merge-pathnames source-directory))))
     (with-output-to-zipfile (zip pathname :if-exists if-exists)
       (labels ((recurse (d)
