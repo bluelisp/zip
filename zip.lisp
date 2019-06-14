@@ -182,6 +182,10 @@
   stream
   entries)
 
+(setf (documentation 'zipfile-entries 'function)
+      "Return a hash-table mapping filenames to entry handles for all files
+contained in the zip archive.")
+
 (defstruct zipfile-entry
   name
   stream
@@ -189,8 +193,16 @@
   size
   compressed-size
   comment
+  method
   date
+  universal-time
+  crc
+  made-by
+  made-by-version
   mode)
+
+(setf (documentation 'zipfile-entry-name 'function)
+      "Return an entry's file name as a string.")
 
 (defstruct zipwriter
   stream
@@ -205,6 +217,125 @@
   header)
 
 (defvar *force-utf-8* nil)
+
+(defparameter *compression-methods*
+  `(( 0 . :none)	;;   - The file is stored (no compression)
+    ( 1 . :shrunk)	;;   - The file is Shrunk
+    ( 2 . :reduced-1)	;;   - The file is Reduced with compression factor 1
+    ( 3 . :reduced-2)	;;   - The file is Reduced with compression factor 2
+    ( 4 . :reduced-3)	;;   - The file is Reduced with compression factor 3
+    ( 5 . :reduced-4)	;;   - The file is Reduced with compression factor 4
+    ( 6 . :impode)	;;   - The file is Imploded
+    ( 7 . :reserved-1)	;;   - Reserved for Tokenizing compression algorithm
+    ( 8 . :deflate)	;;   - The file is Deflated
+    ( 9 . :deflate64)	;;   - Enhanced Deflating using Deflate64(tm)
+    (10 . :pk-implode)	;;   - PKWARE Imploding (old IBM TERSE)
+    (11 . :reserved-2)	;;   - Reserved by PKWARE
+    (12 . :bzip2)	;;   - File is compressed using BZIP2 algorithm
+    (13 . :reserved-3)	;;   - Reserved by PKWARE
+    (14 . :lzma)	;;   - LZMA (EFS)
+    (15 . :reserved-4)	;;   - Reserved by PKWARE
+    (16 . :reserved-5)	;;   - Reserved by PKWARE
+    (17 . :reserved-6)	;;   - Reserved by PKWARE
+    (18 . :terse)	;;   - File is compressed using IBM TERSE (new)
+    (19 . :lz77)	;;   - IBM LZ77 z Architecture (PFS)
+    ;; If the order would have been preserved, everyone could still be using
+    ;; an array, without special casing.
+    (97 . :wavepack)	;;   - WavPack compressed data
+    (98 . :ppmd)	;;   - PPMd version I, Rev 1
+    ))
+
+(defun compression-method-name (number)
+  "Return a mildly useful keyword, given the number, or :unkown if we don't
+know about it."
+  (or (cdr (assoc number *compression-methods*))
+      :unknown))
+
+(defconstant +MS-DOS+         0)
+(defconstant +Amiga+          1)
+(defconstant +OpenVMS+        2)
+(defconstant +UNIX+           3)
+(defconstant +VM/CMS+         4)
+(defconstant +Atari-ST+       5)
+(defconstant +OS/2-HPFS+      6)
+(defconstant +Macintosh+      7)
+(defconstant +Z-System+       8)
+(defconstant +CP/M+           9)
+(defconstant +Windows-NTFS+   10)
+(defconstant +MVS+            11)
+(defconstant +VSE+            12)
+(defconstant +Acorn-Risc+     13)
+(defconstant +VFAT+           14)
+(defconstant +alternate-MVS+  15)
+(defconstant +BeOS+           16)
+(defconstant +Tandem+         17)
+(defconstant +OS/400+         18)
+(defconstant +OS-X-Darwin+    19)
+
+(defparameter *made-by-name*
+  `(( 0 . "MS-DOS") ; or OS/2 FAT
+    ( 1 . "Amiga")
+    ( 2 . "OpenVMS")
+    ( 3 . "UNIX")
+    ( 4 . "VM/CMS")
+    ( 5 . "Atari ST")
+    ( 6 . "OS/2 HPFS")
+    ( 7 . "Macintosh")
+    ( 8 . "Z-System")
+    ( 9 . "CP/M")
+    (10 . "Windows NTFS")
+    (11 . "MVS")
+    (12 . "VSE")
+    (13 . "Acorn Risc")
+    (14 . "VFAT")
+    (15 . "alternate MVS")
+    (16 . "BeOS")
+    (17 . "Tandem")
+    (18 . "OS/400")
+    (19 . "OS X (Darwin)")))
+
+(defun made-by-name (code)
+  "Given the number CODE, return a string describing the system or filesystem
+that something supposedly came from, or :unkown if we don't know about it."
+  (or (cdr (assoc code *made-by-name*))
+      :unknown))
+
+(defun made-by-version (code)
+  "Return a cons of the major and minor version numbers, given the whole 16-bit
+'version-made-by' code."
+  (let ((value (logand code #xff)))
+    (cons (truncate (/ value 10))
+	  (truncate (mod value 10)))))
+
+#|
+Bits   Description
+-----  -----------
+15-9   Year 0 = 1980
+ 8-5   Month (1-12)
+ 4-0   Day (1-31)
+
+15-11  Hours (0-23)
+10-5   Minutes (0-59)
+ 4-0   Seconds/2 (0-29)
+       The seconds is recorded only to a 2 second resolution.
+|#
+(defconstant +dos-year-pivot+ 1980
+  "Yet more trouble, still to be dealt with.")
+
+;; This should ideally go somewhere else.
+(defun dos-to-universal-time (date time)
+  "Take the 16 bit date and time in DOS/FAT format, and return a"
+  (let ((year (+ (logand (ash date  -9) #x7f) +dos-year-pivot+))
+	(mon     (logand (ash date  -5) #x0f))
+	(date    (logand      date      #x1f))
+	(hour    (logand (ash time -11) #x1f))
+	(min     (logand (ash time  -5) #x3f))
+	;; The min 59 is not technically true because: leap seconds!!!
+	;; But the Common Lisp specification says it must be 0-59 for
+	;; encode-universal-time. Anyway, in this case it's mostly likely not
+	;; a real leap second, but just due to the 2 second multiply.
+	(sec  (min 59 (* (logand (ash time  -1) #x1f) 2))))
+    (encode-universal-time sec min hour date mon year)))
 
 (defun read-entry-object (s)
   (let* ((header (make-directory-entry s))
@@ -228,7 +359,15 @@
 			:size (cd/size header)
 			:compressed-size (cd/compressed-size header)
 			:comment comment
-                        :date (cd/date header)
+			:method (compression-method-name (cd/method header))
+			:date (cd/date header)
+                        :universal-time (dos-to-universal-time
+					 (cd/date header) (cd/time header))
+			:crc (cd/crc header)
+			:made-by (logand (ash (cd/version-made-by header) -8)
+					 #xff)
+			:made-by-version
+			(made-by-version (cd/version-made-by header))
                         :mode (ash (cd/external-attributes header) -16))))
 
 (defmacro with-latin1 ((&optional (enable t)) &body body)
@@ -257,6 +396,11 @@
         zipfile))))
 
 (defun open-zipfile (pathname &key force-utf-8)
+  "Return a ZIPFILE structure, representing the contents of PATHNAME.
+You should probably eventualy call CLOSE-ZIPFILE on the results, but maybe on
+some implementations, like SBCL, it will be done for you on garbage collection.
+If FORCE-UTF-8 is true, force using the UTF-8 encoding, instead of whatever
+else might be the default, probably LATIN-1."
   (with-latin1 ()
     (let* ((*force-utf-8* force-utf-8)
 	   (s (open pathname :element-type '(unsigned-byte 8))))
@@ -279,9 +423,11 @@
 	  (close s))))))
 
 (defun close-zipfile (zipfile)
+  "Close the file handle."
   (close (zipfile-stream zipfile)))
 
 (defun get-zipfile-entry (name zipfile)
+  "Return an entry handle for the file called NAME."
   (gethash name (zipfile-entries zipfile)))
 
 (defvar *allow-cp437* nil)
@@ -453,6 +599,14 @@
       (setf (gethash (code-char unicode) *unicode->cp437*)
             (code-char cp437)))
 
+(defgeneric write-zipentry (zip-writer name data
+			    &key file-write-date deflate file-mode)
+  (:documentation
+   "Append a new entry called name to zipwriter. Read data from
+(unsigned-byte 8) stream data until EOF and compress it into
+\deflate\"-format. Use file-write-date as the entry's date and time.
+Default to (file-write-date data), use 1980-01-01T00:00 if nil."))
+
 (defmethod write-zipentry
     (zip-writer name (data pathname)
      &key (file-write-date (file-write-date data)) (deflate t)
@@ -500,7 +654,7 @@
 	  (setf (file/time header)
 		(logior (ash h 11) (ash min 5) (ash s -1)))
 	  (setf (file/date header)
-		(logior (ash (- y 1980) 9) (ash m 5) d)))
+		(logior (ash (- y +dos-year-pivot+) 9) (ash m 5) d)))
 	(setf (file/crc header) 0)
 	(setf (file/compressed-size header) 0)
 	(setf (file/size header) 0)
@@ -597,6 +751,9 @@
 	outbuf))))
 
 (defun zipfile-entry-contents (entry &optional stream)
+  "If stream is given, extract entry to the (unsigned-byte 8) stream given as
+the argument. Otherwise, return the entry contents as an
+(unsigned-byte 8) vector."
   (if (pathnamep stream)
       (with-open-file (s stream
 			 :direction :output
@@ -606,12 +763,16 @@
       (%zipfile-entry-contents entry stream)))
 
 (defmacro with-zipfile ((file pathname &key force-utf-8) &body body)
+  "Evaluate BODY with FILE bound to the result of OPEN-ZIPFILE on PATHNAME.
+Passes FORCE-UTF-8 to OPEN-ZIPFILE."
   `(let ((,file (open-zipfile ,pathname :force-utf-8 ,force-utf-8)))
      (unwind-protect
 	 (progn ,@body)
        (close-zipfile ,file))))
 
 (defmacro with-zipfile-stream ((file stream &key force-utf-8) &body body)
+  "Evaluate BODY with FILE bound to the result of OPEN-ZIPFILE-FROM-STREAM on
+STREAM. Passes FORCE-UTF-8 to OPEN-ZIPFILE-FROM-STREAM."
   `(let ((,file (open-zipfile-from-stream ,stream :force-utf-8 ,force-utf-8)))
      ,@body))
 
@@ -639,6 +800,9 @@
        (close-zipfile-writer ,var))))
 
 (defmacro do-zipfile-entries ((name entry zipfile) &body body)
+  "Map over all entries in zipfile binding NAME and ENTRY to each
+file name and entry handle in turn. Establish implicit block named NIL
+around the loop."
   (setf name (or name (gensym)))
   (setf entry (or entry (gensym)))
   `(block nil
@@ -647,13 +811,16 @@
 		,@body)
 	      (zipfile-entries ,zipfile))))
 
-(defun unzip (pathname target-directory &key (if-exists :error) verbose force-utf-8)
+(defun unzip (pathname target-directory &key (if-exists :error) verbose
+					  force-utf-8)
+  "Extract all entries from the zip archive at PATHNAME into TARGET-DIRECTORY.
+IF-EXISTS as for in CL:OPEN."
   ;; <Xof> "When reading[1] the value of any pathname component, conforming
   ;;       programs should be prepared for the value to be :unspecific."
   (when (set-difference (list (pathname-name target-directory)
                               (pathname-type target-directory))
                         '(nil :unspecific))
-    (error "pathname not a directory, lacks trailing slash?"))
+    (error "Pathname not a directory. Perhaps it lacks a trailing slash?"))
   (with-zipfile (zip pathname :force-utf-8 force-utf-8)
     (do-zipfile-entries (name entry zip)
       (let* (#+nil (name (ppcre:regex-replace-all "[/*?]" name "_"))
@@ -693,6 +860,9 @@
     #-sbcl x))
 
 (defun zip (pathname source-directory &key (if-exists :error) skip-directories-p)
+  "Compress all files in source-directory recursively into a new zip
+archive at pathname. Note that entry file names will not contain the name
+source-directory."
   (let ((base (%directory-namestring (merge-pathnames source-directory))))
     (with-output-to-zipfile (zip pathname :if-exists if-exists)
       (labels ((recurse (d)

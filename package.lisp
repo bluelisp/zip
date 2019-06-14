@@ -8,11 +8,21 @@
 	   #:with-zipfile
 	   #:zipfile-entries
 	   #:get-zipfile-entry
+	   #:zipfile-entry
 	   #:zipfile-entry-name
-           #:zipfile-entry-size
-           #:zipfile-entry-comment
+	   #:zipfile-entry-size
+	   #:zipfile-entry-compressed-size
+	   #:zipfile-entry-comment
+	   #:zipfile-entry-method
+	   #:zipfile-entry-date
+	   #:zipfile-entry-universal-time
+	   #:zipfile-entry-crc
+	   #:zipfile-entry-made-by
+	   #:zipfile-entry-made-by-version
+	   #:zipfile-entry-mode
 	   #:do-zipfile-entries
 	   #:zipfile-entry-contents
+	   #:made-by-name
 	   #:unzip
 
            #:with-output-to-zipfile     ;writing ZIP files
