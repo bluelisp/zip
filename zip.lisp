@@ -217,7 +217,9 @@
          (utf8p (or (logtest (cd/flags header) 2048) *force-utf-8*)))
     (assert (= (cd/signature header) #x02014b50))
     (read-sequence name s)
-    (setf name (decode-name name utf8p))
+    (setf name #+sbcl (namestring (sb-impl::parse-native-namestring
+				   (decode-name name utf8p)))
+	       #-sbcl (decode-name name utf8p))
     (file-position s (+ (file-position s) (cd/extra-length header)))
     (when comment
       (read-sequence comment s)
