@@ -658,7 +658,11 @@
     (do-zipfile-entries (name entry zip)
       (let* (#+nil (name (ppcre:regex-replace-all "[/*?]" name "_"))
              #+nil (name (subseq name 0 (min (length name) 128)))
-             (filename (merge-pathnames name target-directory)))
+             (filename (merge-pathnames
+                        ;; Present in ASDF 3.0.0, not present in 2.000
+                        #+ASDF3 (uiop:ensure-pathname name)
+                        #-ASDF3 name
+                        target-directory)))
         (ensure-directories-exist filename)
         (unless (char= (elt name (1- (length name))) #\/)
           (ecase verbose
